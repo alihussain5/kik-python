@@ -21,43 +21,119 @@ or add the following line to your project's requirements.txt file:
 Example Bot
 -----------
 
-Here is a minimal echo bot using Flask
+Here is a bot built using Kik's Python API and Flask.
 
 .. code-block:: python
     :linenos:
 
-    from flask import Flask, request, Response
+   from flask import Flask, request, Response
 
-    from kik import KikApi, Configuration
-    from kik.messages import messages_from_json, TextMessage
+   from kik import KikApi, Configuration
+   from kik.messages import messages_from_json, TextMessage, PictureMessage, SuggestedResponseKeyboard, TextResponse, StartChattingMessage
 
-    app = Flask(__name__)
-    kik = KikApi(BOT_USERNAME, BOT_API_KEY)
+   app = Flask(__name__)
+   kik = KikApi('BOT_USERNAME_HERE', 'BOT_API_KEY_HERE')
 
-    kik.set_configuration(Configuration(webhook=YOUR_WEBHOOK))
-
-    @app.route('/incoming', methods=['POST'])
-    def incoming():
-        if not kik.verify_signature(request.headers.get('X-Kik-Signature'), request.get_data()):
-            return Response(status=403)
-
-        messages = messages_from_json(request.json['messages'])
-
-        for message in messages:
-            if isinstance(message, TextMessage):
-                kik.send_messages([
-                    TextMessage(
-                        to=message.from_user,
-                        chat_id=message.chat_id,
-                        body=message.body
-                    )
-                ])
-
-        return Response(status=200)
+   kik.set_configuration(Configuration(webhook='WEBHOOK_HERE'))
 
 
-    if __name__ == "__main__":
-        app.run(port=8080, debug=True)
+   @app.route('/incoming', methods=['POST'])
+   def incoming():
+       if not kik.verify_signature(request.headers.get('X-Kik-Signature'), request.get_data()):
+           return Response(status=403)
+
+       messages = messages_from_json(request.json['messages'])
+
+       for message in messages:
+           # Check if it's the user's first message
+           if isinstance(message, StartChattingMessage):
+               user = kik.get_user(message.from_user)
+
+               response_body = u'Hey {}, How are you?'.format(user.first_name)
+
+               response_messages = [
+                   TextMessage(
+                       to=message.from_user,
+                       chat_id=message.chat_id,
+                       body=response_body,
+                       keyboards=[
+                           SuggestedResponseKeyboard(
+                               responses=[TextResponse('Good'), TextResponse('Bad')]
+                           )]
+                   )]
+
+           # Check if the user has sent a text message
+           elif isinstance(message, TextMessage):
+               user = kik.get_user(message.from_user)
+
+               # Check if this message is part of the suggested responses
+               if message.body == 'Good':
+                   response_body = 'That\'s Great! :)'
+               elif message.body == 'Bad':
+                   response_body = 'Oh no! :('
+               else:
+                   response_body = 'Sorry, I didn\'t quite get that'
+
+               response_messages = [
+                   TextMessage(
+                       to=message.from_user,
+                       chat_id=message.chat_id,
+                       body=response_body
+                   )]
+
+               # Send the user a response along with their profile picture (function definition is below)
+               response_messages += profile_pic_check_messages(user, message)
+
+           # If its not a text message, give them another chance to use the suggested responses
+           else:
+               response_body = 'Sorry, I didn\'t quite get that'
+
+               response_messages = [
+                   TextMessage(
+                       to=message.from_user,
+                       chat_id=message.chat_id,
+                       body=response_body,
+                       keyboards=[
+                           SuggestedResponseKeyboard(
+                               responses=[TextResponse('Good'), TextResponse('Bad')]
+                           )]
+                   )]
+
+           kik.send_messages(response_messages)
+
+       return Response(status=200)
+
+
+   #  Function to check if user has a profile picture and returns appropriate messages.
+   def profile_pic_check_messages(user, message):
+       messages_to_send = []
+
+       profile_picture = user.profile_pic_url
+
+       if profile_picture is not None:
+           messages_to_send.append(
+               PictureMessage(
+                   to=message.from_user,
+                   chat_id=message.chat_id,
+                   pic_url=profile_picture
+               ))
+
+           profile_picture_response = 'Here\'s your profile picture!'
+       else:
+           profile_picture_response = 'It doesn\'t look like you have a profile picture, you should set one'
+
+       messages_to_send.append(
+           TextMessage(
+               to=message.from_user,
+               chat_id=message.chat_id,
+               body=profile_picture_response
+           ))
+
+       return messages_to_send
+
+
+   if __name__ == "__main__":
+       app.run(port=8080, host='0.0.0.0', debug=True)
 
 The API Client
 --------------
